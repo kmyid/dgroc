@@ -76,6 +76,9 @@ building the source rpm.
 ``copr`` The optional name of the copr repository to build the package within.
 When not set, the project name (from `[]`) is used.
 
+``archive_cmd`` Alternative command to generate source archive. This command
+needs to print the name of the generated archive to stdout.
+
 .. Note:: The spec file should be fully functionnal as all ``dgroc`` will do is
           update the ``Source0``, ``Release`` and add an entry in the ``Changelog``.
 

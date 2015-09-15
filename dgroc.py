@@ -20,6 +20,7 @@ import subprocess
 import shutil
 import time
 import warnings
+import re
 from datetime import date
 
 from copr.client import CoprClient
@@ -77,8 +78,8 @@ class GitReader(object):
     @classmethod
     def archive_cmd(cls, project, archive_name):
         '''Command to generate the archive'''
-        return ["git", "archive", "--format=tar", "--prefix=%s/" % project,
-           "-o%s/%s" % (get_rpm_sourcedir(), archive_name), "HEAD"]
+        return "git archive --format=tar --prefix=%s/ -o%s/%s HEAD" % (project,
+            get_rpm_sourcedir(), archive_name)
 
 class MercurialReader(object):
     '''Alternative version control system to use: hg'''
@@ -109,8 +110,8 @@ class MercurialReader(object):
     @classmethod
     def archive_cmd(cls, project, archive_name):
         '''Command to generate the archive'''
-        return ["hg", "archive", "--type=tar", "--prefix=%s/" % project,
-           "%s/%s" % (get_rpm_sourcedir(), archive_name)]
+        return "hg archive --type=tar --prefix=%s/ %s/%s" % (project,
+            get_rpm_sourcedir(), archive_name)
 
 
 def _get_copr_client():
@@ -216,6 +217,64 @@ def get_rpm_sourcedir():
     return dirname
 
 
+def _get_archive_name(out, project):
+    ''' Try to find generated archive name in the archive_cmd output
+    '''
+    name = ''
+    for line in out:
+        search = re.search(r"" + project + r"\-[^\s]*\.tar(\.gz|\.bz2)", line)
+        if search:
+            name = search.group()
+
+    if name:
+        LOG.debug('Archive name from output: %s' % name)
+        return name
+
+    if out:
+        LOG.debug('Last line of archive_cmd output: \"%s\"' % line)
+
+    raise DgrocException('No archive name found.')
+
+
+def generate_archive(config, project, git_folder, commit_hash, reader):
+    ''' For a given project in the configuration file generate a new source
+    archive if it is possible.
+    '''
+
+    if config.has_option(project, 'archive_cmd'):
+        archive_name = ''
+        cmd = config.get(project, 'archive_cmd')
+    else:
+        archive_name = "%s-%s.tar" % (project, commit_hash)
+        cmd = reader.archive_cmd(project, archive_name)
+
+    LOG.debug('Command to generate archive: %s' % cmd)
+
+    cwd = os.getcwd()
+    os.chdir(git_folder)
+    pull = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=True)
+    out = pull.communicate()
+
+    # no archive name -> need to read it from output and move the archive
+    # to rpm source dir
+    if not archive_name:
+        archive_name = _get_archive_name(out, project)
+        if not os.path.isfile(git_folder + "/" + archive_name):
+            LOG.info('Got archive name %s, but no such file found ' \
+                     'in %s' % (archive_name, git_folder))
+            raise DgrocException('No archive to generate SRPM.')
+        shutil.move(git_folder + '/' + archive_name,
+                    get_rpm_sourcedir() + '/' + archive_name)
+
+    os.chdir(cwd)
+
+    return archive_name
+
+
 def generate_new_srpm(config, project, first=True):
     ''' For a given project in the configuration file generate a new srpm
     if it is possible.
@@ -288,17 +347,7 @@ def generate_new_srpm(config, project, first=True):
         return
 
     # Build sources
-    cwd = os.getcwd()
-    os.chdir(git_folder)
-    archive_name = "%s-%s.tar" % (project, commit_hash)
-    cmd = reader.archive_cmd(project, archive_name)
-    LOG.debug('Command to generate archive: %s', ' '.join(cmd))
-    pull = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE)
-    out = pull.communicate()
-    os.chdir(cwd)
+    archive_name = generate_archive(config, project, git_folder, commit_hash, reader)
 
     # Update spec file
     spec_file = config.get(project, 'spec_file')
