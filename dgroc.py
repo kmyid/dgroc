@@ -21,6 +21,7 @@ import shutil
 import time
 import warnings
 import re
+import traceback
 from datetime import date
 
 from copr.client import CoprClient
@@ -38,8 +39,9 @@ except ImportError:
 DEFAULT_CONFIG = os.path.expanduser('~/.config/dgroc')
 COPR_URL = 'http://copr.fedoraproject.org/'
 # Initial simple logging stuff
-logging.basicConfig(format='%(message)s')
+logging.basicConfig(format='%(name)s: %(message)s')
 LOG = logging.getLogger("dgroc")
+COPR_LOG = logging.getLogger("copr.client")
 
 
 class DgrocException(Exception):
@@ -433,12 +435,14 @@ def copr_build(config, srpms):
             copr = project
 
         try:
+            LOG.debug("Creating new build for project '%s'. SRPMS: %s", copr, srpms[project])
             res = copr_client.create_new_build(copr, pkgs=[srpms[project]])
 
             builds_list += res.builds_list
 
         except Exception as e:
             LOG.info("Something went wrong:\n  %s", str(e))
+            LOG.debug("%s", traceback.format_exc())
     return builds_list
 
 
@@ -464,11 +468,13 @@ def main():
     args = get_arguments()
 
     global LOG
-    #global LOG
+    global COPR_LOG
     if args.debug:
         LOG.setLevel(logging.DEBUG)
+        COPR_LOG.setLevel(logging.DEBUG)
     else:
         LOG.setLevel(logging.INFO)
+        COPR_LOG.setLevel(logging.INFO)
 
     # Read configuration file
     config = ConfigParser.ConfigParser()
@@ -497,6 +503,7 @@ def main():
             LOG.info('%s: %s', project, err)
 
     LOG.info('%s srpms generated', len(srpms))
+    LOG.debug('%s', ', '.join(srpms))
     if not srpms:
         return
 
