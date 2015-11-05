@@ -116,22 +116,64 @@ class MercurialReader(object):
             get_rpm_sourcedir(), archive_name)
 
 
-def _get_copr_client():
-    ''' Return the CoprClient instance.
+def _get_copr_auth(dgroc_config):
+    ''' Return the username, login and API token from the copr configuration
+    file.
     '''
     LOG.debug('Reading configuration for copr')
+
+    ## dgroc config check
+    if not dgroc_config.has_option('main', 'copr_url'):
+        warnings.warn(
+            'No `copr_url` option set in the `main` section of the dgroc '
+            'configuration file, using default: %s' % COPR_URL)
+        copr_url = COPR_URL
+    else:
+        copr_url = dgroc_config.get('main', 'copr_url')
+
+    if not copr_url.endswith('/'):
+        copr_url = '%s/' % copr_url
+
     ## Copr config check
     copr_config_file = os.path.expanduser('~/.config/copr')
     if not os.path.exists(copr_config_file):
         raise DgrocException('No `~/.config/copr` file found.')
 
+    copr_config = ConfigParser.ConfigParser()
+    copr_config.read(copr_config_file)
+
+    if not copr_config.has_option('copr-cli', 'username'):
+        raise DgrocException(
+            'No `username` specified in the `copr-cli` section of the copr '
+            'configuration file.')
+    username = copr_config.get('copr-cli', 'username')
+
+    if not copr_config.has_option('copr-cli', 'login'):
+        raise DgrocException(
+            'No `login` specified in the `copr-cli` section of the copr '
+            'configuration file.')
+    login = copr_config.get('copr-cli', 'login')
+
+    if not copr_config.has_option('copr-cli', 'token'):
+        raise DgrocException(
+            'No `token` specified in the `copr-cli` section of the copr '
+            'configuration file.')
+    token = copr_config.get('copr-cli', 'token')
+
+    return (username, login, token, copr_url)
+
+
+def _get_copr_client(dgroc_config):
+    ''' Return the CoprClient instance.
+    '''
+
+    username, login, token, copr_url = _get_copr_auth(dgroc_config)
+
     try:
-        copr_client = CoprClient.create_from_file_config()
+        copr_client = CoprClient(username, login, token, copr_url)
     except Exception as e:
         raise DgrocException(
-             'Failed to read data from the copr '
-             'configuration file.\n %s' % str(e))
-
+             'Failed to create copr client.\n %s' % str(e))
 
     return copr_client
 
@@ -412,19 +454,7 @@ def copr_build(config, srpms):
     run the build in copr.
     '''
 
-    ## dgroc config check
-    if not config.has_option('main', 'copr_url'):
-        warnings.warn(
-            'No `copr_url` option set in the `main` section of the dgroc '
-            'configuration file, using default: %s' % COPR_URL)
-        copr_url = COPR_URL
-    else:
-        copr_url = config.get('main', 'copr_url')
-
-    if not copr_url.endswith('/'):
-        copr_url = '%s/' % copr_url
-
-    copr_client = _get_copr_client()
+    copr_client = _get_copr_client(config)
 
     builds_list = []
     ## Build project/srpm in copr
